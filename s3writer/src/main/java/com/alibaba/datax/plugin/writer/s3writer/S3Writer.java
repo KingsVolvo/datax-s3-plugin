@@ -40,16 +40,16 @@ public class S3Writer extends Writer {
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
             this.validateParameter();
-            this.s3Client = S3Util.initS3Client(this.writerSliceConfig);
+            this.s3Client = S3Util.initS3ClientByAssumeRole(this.writerSliceConfig);
         }
 
         private void validateParameter() {
             this.writerSliceConfig.getNecessaryValue(Key.REGION,
                     S3WriterErrorCode.REQUIRED_VALUE);
-            this.writerSliceConfig.getNecessaryValue(Key.ACCESSID,
-                    S3WriterErrorCode.REQUIRED_VALUE);
-            this.writerSliceConfig.getNecessaryValue(Key.ACCESSKEY,
-                    S3WriterErrorCode.REQUIRED_VALUE);
+//            this.writerSliceConfig.getNecessaryValue(Key.ACCESSID,
+//                    S3WriterErrorCode.REQUIRED_VALUE);
+//            this.writerSliceConfig.getNecessaryValue(Key.ACCESSKEY,
+//                    S3WriterErrorCode.REQUIRED_VALUE);
             this.writerSliceConfig.getNecessaryValue(Key.BUCKET,
                     S3WriterErrorCode.REQUIRED_VALUE);
             this.writerSliceConfig.getNecessaryValue(Key.OBJECT,
@@ -127,7 +127,7 @@ public class S3Writer extends Writer {
                     }
                 }
             } catch (Exception e) {
-                throw DataXException.asDataXException(S3WriterErrorCode.S3_COMM_ERROR, e.getMessage());
+                throw DataXException.asDataXException(S3WriterErrorCode.S3_COMM_ERROR, e);
             }
         }
 
@@ -244,9 +244,9 @@ public class S3Writer extends Writer {
             //warn: may be StringBuffer->StringBuilder
             StringWriter sw = new StringWriter();
             StringBuffer sb = sw.getBuffer();
-            UnstructuredWriter unstructuredWriter = TextCsvWriterManager
+            UnstructuredWriter unstructuredWriter = UnstructuredStorageWriterUtil
                     .produceUnstructuredWriter(this.fileFormat,
-                            this.fieldDelimiter, sw);
+                            this.writerSliceConfig, sw);
             Record record = null;
 
             LOG.info(String.format(
@@ -306,7 +306,7 @@ public class S3Writer extends Writer {
                     // write: upload data to current object
                     UnstructuredStorageWriterUtil.transportOneRecord(record,
                             this.nullFormat, this.dateParse,
-                            this.getTaskPluginCollector(), unstructuredWriter);
+                            this.getTaskPluginCollector(), unstructuredWriter, this.encoding);
 
                     if (sb.length() >= partSize) {
                         this.uploadOnePart(sw, currentPartNumber,

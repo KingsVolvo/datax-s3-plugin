@@ -16,4 +16,9 @@ public class Key {
 
     public static final String OBJECT = "object";
 
+    public static final String ROLEARN = "roleArn";
+
+    public static final String ROLESESSIONNAME = "roleSessionName";
+
+    public static final String ACCESSTOKEN = "accessToken";
 }
