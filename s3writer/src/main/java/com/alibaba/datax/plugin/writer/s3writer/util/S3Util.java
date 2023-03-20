@@ -34,7 +34,7 @@ public class S3Util {
                 AWSCredentials awsCreds = new BasicAWSCredentials(accessId, accessKey);
                 client = AmazonS3ClientBuilder.standard().withCredentials(new AWSStaticCredentialsProvider(awsCreds)).withRegion(region).build();
             } else {
-                LOG.info("BasicSessionCredentials begins, accessToken is not null. accessId:{},accessKey:{},accessToken:{}", accessId, accessKey, accessToken);
+                LOG.debug("BasicSessionCredentials begins, accessToken is not null. accessId:{},accessKey:{},accessToken:{}", accessId, accessKey, accessToken);
                 AWSCredentialsProvider awsCredsProvider = new AWSStaticCredentialsProvider(new BasicSessionCredentials(accessId, accessKey, accessToken));
                 client = AmazonS3ClientBuilder.standard().withCredentials(awsCredsProvider).withRegion(region).build();
             }

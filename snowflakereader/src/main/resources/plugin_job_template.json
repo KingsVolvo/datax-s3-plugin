@@ -1,0 +1,13 @@
+{
+    "name": "snowflakereader",
+    "parameter": {
+        "username": "",
+        "password": "",
+        "connection": [
+            {
+                "table": [],
+                "jdbcUrl": []
+            }
+        ]
+    }
+}

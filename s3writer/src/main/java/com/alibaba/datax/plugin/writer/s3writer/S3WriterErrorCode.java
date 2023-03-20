@@ -4,6 +4,7 @@ import com.alibaba.datax.common.spi.ErrorCode;
 
 /**
  * Created by chochen on 2021/5/31.
+ * Implement by kings.huang at 2023/03/14.
  */
 public enum S3WriterErrorCode implements ErrorCode {
     
