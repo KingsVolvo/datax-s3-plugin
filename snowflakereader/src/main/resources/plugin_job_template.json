@@ -3,6 +3,8 @@
     "parameter": {
         "username": "",
         "password": "",
+        "auth_type": "",
+        "key_file_path": "",
         "connection": [
             {
                 "table": [],

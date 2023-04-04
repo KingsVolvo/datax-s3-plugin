@@ -12,4 +12,9 @@ public class Key {
     public static final String db = "db";
 
     public static final String schema = "schema";
+
+    public static final String AUTH_TYPE = "auth_type";
+
+    public static final String KEY_FILE_PATH = "key_file_path";
+    ;
 }
