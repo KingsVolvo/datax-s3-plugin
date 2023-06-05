@@ -8,6 +8,7 @@
         "object": "",
         "roleArn": "",
         "roleSessionName": "",
+        "sessionDurations": "",
         "region": "",
         "encoding": "",
         "fieldDelimiter": "",

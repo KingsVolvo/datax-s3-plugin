@@ -56,7 +56,8 @@ public class S3Util {
         //2 Assume new role
         String roleArnRead = conf.getString(Key.ROLEARN);
         String roleSessionName = conf.getString(Key.ROLESESSIONNAME);
-        STSAssumeRoleSessionCredentialsProvider stsAssumeRoleProvider = new STSAssumeRoleSessionCredentialsProvider.Builder(roleArnRead, roleSessionName).withStsClient(sts).build();
+        int roleSessionDuration = conf.getInt(Key.SESSIONDURATIONSECONDS);
+        STSAssumeRoleSessionCredentialsProvider stsAssumeRoleProvider = new STSAssumeRoleSessionCredentialsProvider.Builder(roleArnRead, roleSessionName).withRoleSessionDurationSeconds(roleSessionDuration).withStsClient(sts).build();
         AWSSessionCredentials newCredentials = stsAssumeRoleProvider.getCredentials();
         conf.set(Key.ACCESSID, newCredentials.getAWSAccessKeyId());
         conf.set(Key.ACCESSKEY, newCredentials.getAWSSecretKey());

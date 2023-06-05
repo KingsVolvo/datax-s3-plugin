@@ -62,8 +62,8 @@ public class SnowflakeReader extends Reader {
                     Integer.MIN_VALUE);
             this.originalConfig.set(Constant.FETCH_SIZE, fetchSize);
 
-            this.commonRdbmsReaderJob = new CommonRdbmsReader.Job(DATABASE_TYPE);
-             this.commonRdbmsReaderJob.init(this.originalConfig);
+            this.commonRdbmsReaderJob = new SnowFlakeReaderJob(DATABASE_TYPE);
+            this.commonRdbmsReaderJob.init(this.originalConfig);
         }
 
         @Override
@@ -114,6 +114,13 @@ public class SnowflakeReader extends Reader {
             this.commonRdbmsReaderJob.destroy(this.originalConfig);
         }
 
+    }
+
+    public static class SnowFlakeReaderJob extends CommonRdbmsReader.Job{
+
+        public SnowFlakeReaderJob(DataBaseType dataBaseType) {
+            super(dataBaseType);
+        }
     }
 
 
