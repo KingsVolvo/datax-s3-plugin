@@ -21,6 +21,8 @@ public class S3Util {
 
     private static final Logger LOG = LoggerFactory.getLogger(S3Util.class);
 
+    private static final int DEFAULT_DURATIONS = 900;
+
     public static AmazonS3 initS3Client(Configuration conf) {
         String regionStr = conf.getString(Key.REGION);
         Regions region = Regions.fromName(regionStr);
@@ -56,7 +58,7 @@ public class S3Util {
         //2 Assume new role
         String roleArnRead = conf.getString(Key.ROLEARN);
         String roleSessionName = conf.getString(Key.ROLESESSIONNAME);
-        int roleSessionDuration = conf.getInt(Key.SESSIONDURATIONSECONDS);
+        int roleSessionDuration = conf.getInt(Key.SESSIONDURATIONSECONDS,DEFAULT_DURATIONS);
         STSAssumeRoleSessionCredentialsProvider stsAssumeRoleProvider = new STSAssumeRoleSessionCredentialsProvider.Builder(roleArnRead, roleSessionName).withRoleSessionDurationSeconds(roleSessionDuration).withStsClient(sts).build();
         AWSSessionCredentials newCredentials = stsAssumeRoleProvider.getCredentials();
         conf.set(Key.ACCESSID, newCredentials.getAWSAccessKeyId());
