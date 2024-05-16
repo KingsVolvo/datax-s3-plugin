@@ -342,6 +342,10 @@ public class S3Writer extends Writer {
                     if (null != this.header && !this.header.isEmpty()) {
                         unstructuredWriter.writeOneRecord(this.header);
                     }
+                    else{
+                        LOG.info("No data to send .");
+                        return;
+                    }
                 }
                 // warn: may be some data stall in sb
                 if (0 < sb.length()) {
