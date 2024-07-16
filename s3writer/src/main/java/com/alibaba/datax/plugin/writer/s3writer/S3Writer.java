@@ -6,7 +6,6 @@ import com.alibaba.datax.common.plugin.RecordReceiver;
 import com.alibaba.datax.common.spi.Writer;
 import com.alibaba.datax.common.util.Configuration;
 import com.alibaba.datax.common.util.RetryUtil;
-import com.alibaba.datax.plugin.unstructuredstorage.writer.TextCsvWriterManager;
 import com.alibaba.datax.plugin.unstructuredstorage.writer.UnstructuredStorageWriterUtil;
 import com.alibaba.datax.plugin.unstructuredstorage.writer.UnstructuredWriter;
 import com.alibaba.datax.plugin.writer.s3writer.util.S3Util;
@@ -25,6 +24,9 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by chochen on 2021/5/31.
@@ -40,23 +42,17 @@ public class S3Writer extends Writer {
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
             this.validateParameter();
-            this.s3Client = S3Util.initS3ClientByAssumeRole(this.writerSliceConfig);
+
         }
 
+
         private void validateParameter() {
-            this.writerSliceConfig.getNecessaryValue(Key.REGION,
-                    S3WriterErrorCode.REQUIRED_VALUE);
-//            this.writerSliceConfig.getNecessaryValue(Key.ACCESSID,
-//                    S3WriterErrorCode.REQUIRED_VALUE);
-//            this.writerSliceConfig.getNecessaryValue(Key.ACCESSKEY,
-//                    S3WriterErrorCode.REQUIRED_VALUE);
-            this.writerSliceConfig.getNecessaryValue(Key.BUCKET,
-                    S3WriterErrorCode.REQUIRED_VALUE);
-            this.writerSliceConfig.getNecessaryValue(Key.OBJECT,
-                    S3WriterErrorCode.REQUIRED_VALUE);
+            this.writerSliceConfig.getNecessaryValue(Key.REGION, S3WriterErrorCode.REQUIRED_VALUE);
+            this.writerSliceConfig.getNecessaryValue(Key.BUCKET, S3WriterErrorCode.REQUIRED_VALUE);
+            this.writerSliceConfig.getNecessaryValue(Key.OBJECT, S3WriterErrorCode.REQUIRED_VALUE);
+            this.writerSliceConfig.getNecessaryValue(Key.AUTHTYPE, S3WriterErrorCode.REQUIRED_VALUE);
             // warn: do not support compress!!
-            String compress = this.writerSliceConfig
-                    .getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.COMPRESS);
+            String compress = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.COMPRESS);
             if (StringUtils.isNotBlank(compress)) {
                 String errorMessage = String.format("暂时不支持压缩, 该压缩配置项[%s]不起效用", compress);
                 LOG.error(errorMessage);
@@ -71,24 +67,30 @@ public class S3Writer extends Writer {
             LOG.info("begin do prepare...");
             String bucket = this.writerSliceConfig.getString(Key.BUCKET);
             String object = this.writerSliceConfig.getString(Key.OBJECT);
-            String writeMode = this.writerSliceConfig
-                    .getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.WRITE_MODE);
+            //init s3client with authtype
+            String authType = this.writerSliceConfig.getString(Key.AUTHTYPE);
+            if ("default".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3ClientByDefault();
+            } else if ("aksk".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3Client(this.writerSliceConfig);
+            } else if ("assumerole".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3ClientByAssumeRole(this.writerSliceConfig);
+            }
+
+            String writeMode = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.WRITE_MODE);
             // warn: bucket is not exists, create it
             try {
                 // warn: do not create bucket for user
                 if (!this.s3Client.doesBucketExist(bucket)) {
-                    String errorMessage = String.format(
-                            "您配置的bucket [%s] 不存在, 请您确认您的配置项.", bucket);
+                    String errorMessage = String.format("您配置的bucket [%s] 不存在, 请您确认您的配置项.", bucket);
                     LOG.error(errorMessage);
                     throw DataXException.asDataXException(S3WriterErrorCode.ILLEGAL_VALUE, errorMessage);
                 }
-                LOG.info(String.format("access control details [%s].",
-                        this.s3Client.getBucketAcl(bucket).toString()));
+                LOG.info(String.format("access control details [%s].", this.s3Client.getBucketAcl(bucket).toString()));
 
                 // truncate option handler
                 if ("truncate".equals(writeMode)) {
-                    LOG.info(String.format("由于您配置了writeMode truncate, 开始清理 [%s] 下面以 [%s] 开头的Object",
-                                    bucket, object));
+                    LOG.info(String.format("由于您配置了writeMode truncate, 开始清理 [%s] 下面以 [%s] 开头的Object", bucket, object));
                     // warn: 默认情况下，如果Bucket中的Object数量大于100，则只会返回100个Object
                     while (true) {
                         LOG.info("list objects with listObject(bucket, object)");
@@ -103,12 +105,9 @@ public class S3Writer extends Writer {
                         }
                     }
                 } else if ("append".equals(writeMode)) {
-                    LOG.info(String
-                            .format("由于您配置了writeMode append, 写入前不做清理工作, 数据写入Bucket [%s] 下, 写入相应Object的前缀为  [%s]",
-                                    bucket, object));
+                    LOG.info(String.format("由于您配置了writeMode append, 写入前不做清理工作, 数据写入Bucket [%s] 下, 写入相应Object的前缀为  [%s]", bucket, object));
                 } else if ("nonConflict".equals(writeMode)) {
-                    LOG.info(String.format("由于您配置了writeMode nonConflict, 开始检查Bucket [%s] 下面以 [%s] 命名开头的Object",
-                                    bucket, object));
+                    LOG.info(String.format("由于您配置了writeMode nonConflict, 开始检查Bucket [%s] 下面以 [%s] 命名开头的Object", bucket, object));
                     ListObjectsV2Result result = s3Client.listObjectsV2(bucket, object);
                     if (0 < result.getObjectSummaries().size()) {
                         StringBuilder objectKeys = new StringBuilder();
@@ -117,13 +116,8 @@ public class S3Writer extends Writer {
                             objectKeys.append(s3ObjectSummary.getKey() + " ,");
                         }
                         objectKeys.append(" ]");
-                        LOG.info(String.format(
-                                "object with prefix [%s] details: %s", object,
-                                objectKeys));
-                        throw DataXException.asDataXException(
-                                        S3WriterErrorCode.ILLEGAL_VALUE,
-                                        String.format("您配置的Bucket: [%s] 下面存在其Object有前缀 [%s].",
-                                                bucket, object));
+                        LOG.info(String.format("object with prefix [%s] details: %s", object, objectKeys));
+                        throw DataXException.asDataXException(S3WriterErrorCode.ILLEGAL_VALUE, String.format("您配置的Bucket: [%s] 下面存在其Object有前缀 [%s].", bucket, object));
                     }
                 }
             } catch (Exception e) {
@@ -155,8 +149,7 @@ public class S3Writer extends Writer {
                     allObjects.add(objectSummary.getKey());
                 }
             } catch (Exception e) {
-                throw DataXException.asDataXException(
-                        S3WriterErrorCode.S3_COMM_ERROR, e.getMessage());
+                throw DataXException.asDataXException(S3WriterErrorCode.S3_COMM_ERROR, e.getMessage());
             }
 
             String objectSuffix;
@@ -185,8 +178,8 @@ public class S3Writer extends Writer {
     public static class Task extends Writer.Task {
         private static final Logger LOG = LoggerFactory.getLogger(Task.class);
 
-        private AmazonS3 s3Client;
-        private Configuration writerSliceConfig;
+        private static AmazonS3 s3Client;
+        private static Configuration writerSliceConfig;
         private String bucket;
         private String object;
         private String nullFormat;
@@ -202,37 +195,41 @@ public class S3Writer extends Writer {
         @Override
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
-            this.s3Client = S3Util.initS3Client(this.writerSliceConfig);
+            //this.s3Client = S3Util.initS3Client(this.writerSliceConfig);
+            String authType = this.writerSliceConfig.getString(Key.AUTHTYPE);
+            if ("default".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3ClientByDefault();
+            } else if ("aksk".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3Client(this.writerSliceConfig);
+            } else if ("assumerole".equalsIgnoreCase(authType)) {
+                this.s3Client = S3Util.initS3ClientByAssumeRole(this.writerSliceConfig);
+                Task.initScheduler();//Refresh the s3 token
+            }
             this.bucket = this.writerSliceConfig.getString(Key.BUCKET);
             this.object = this.writerSliceConfig.getString(Key.OBJECT);
-            this.nullFormat = this.writerSliceConfig
-                    .getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.NULL_FORMAT);
-            this.dateFormat = this.writerSliceConfig
-                    .getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.DATE_FORMAT,
-                            null);
+            this.nullFormat = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.NULL_FORMAT);
+            this.dateFormat = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.DATE_FORMAT, null);
             if (StringUtils.isNotBlank(this.dateFormat)) {
                 this.dateParse = new SimpleDateFormat(dateFormat);
             }
-            this.encoding = this.writerSliceConfig.getString(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.ENCODING,
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_ENCODING);
-            this.fieldDelimiter = this.writerSliceConfig.getChar(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.FIELD_DELIMITER,
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_FIELD_DELIMITER);
-            this.fileFormat = this.writerSliceConfig.getString(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.FILE_FORMAT,
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.FILE_FORMAT_TEXT);
-            this.header = this.writerSliceConfig.getList(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.HEADER,
-                            null, String.class);
-            this.maxFileSize = this.writerSliceConfig.getLong(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.MAX_FILE_SIZE,
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.MAX_FILE_SIZE);
-            this.suffix = this.writerSliceConfig.getString(
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Key.SUFFIX,
-                            com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_SUFFIX);
+            this.encoding = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.ENCODING, com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_ENCODING);
+            this.fieldDelimiter = this.writerSliceConfig.getChar(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.FIELD_DELIMITER, com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_FIELD_DELIMITER);
+            this.fileFormat = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.FILE_FORMAT, com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.FILE_FORMAT_TEXT);
+            this.header = this.writerSliceConfig.getList(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.HEADER, null, String.class);
+            this.maxFileSize = this.writerSliceConfig.getLong(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.MAX_FILE_SIZE, com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.MAX_FILE_SIZE);
+            this.suffix = this.writerSliceConfig.getString(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.SUFFIX, com.alibaba.datax.plugin.unstructuredstorage.writer.Constant.DEFAULT_SUFFIX);
             this.suffix = this.suffix.trim();// warn: need trim
         }
+
+        private static void initScheduler() {
+            ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+            scheduler.scheduleAtFixedRate(Task::refreshTokenIfNecessary, 0, 25, TimeUnit.MINUTES);
+        }
+
+        private static void refreshTokenIfNecessary() {
+            Task.s3Client = S3Util.initS3ClientByAssumeRole(Task.writerSliceConfig);
+        }
+
 
         @Override
         public void startWrite(RecordReceiver lineReceiver) {
@@ -244,14 +241,10 @@ public class S3Writer extends Writer {
             //warn: may be StringBuffer->StringBuilder
             StringWriter sw = new StringWriter();
             StringBuffer sb = sw.getBuffer();
-            UnstructuredWriter unstructuredWriter = UnstructuredStorageWriterUtil
-                    .produceUnstructuredWriter(this.fileFormat,
-                            this.writerSliceConfig, sw);
+            UnstructuredWriter unstructuredWriter = UnstructuredStorageWriterUtil.produceUnstructuredWriter(this.fileFormat, this.writerSliceConfig, sw);
             Record record = null;
 
-            LOG.info(String.format(
-                    "begin do write, each object maxFileSize: [%s]MB...",
-                    maxPartNumber * 10));
+            LOG.info(String.format("begin do write, each object maxFileSize: [%s]MB...", maxPartNumber * 10));
             String currentObject = this.object;
             InitiateMultipartUploadRequest currentInitiateMultipartUploadRequest = null;
             InitiateMultipartUploadResult currentInitiateMultipartUploadResult = null;
@@ -281,18 +274,14 @@ public class S3Writer extends Writer {
                             } else {
                                 // or with suffix
                                 // myfile__9b886b70fbef11e59a3600163e00068c_1.csv
-                                currentObject = String.format("%s_%s%s",
-                                        this.object, objectRollingNumber,
-                                        this.suffix);
+                                currentObject = String.format("%s_%s%s", this.object, objectRollingNumber, this.suffix);
                             }
                         }
                         objectRollingNumber++;
                         currentInitiateMultipartUploadRequest = new InitiateMultipartUploadRequest(this.bucket, currentObject);
                         currentInitiateMultipartUploadResult = s3Client.initiateMultipartUpload(currentInitiateMultipartUploadRequest);
                         currentPartETags = new ArrayList<PartETag>();
-                        LOG.info(String.format("write to bucket: [%s] object: [%s] with s3 uploadId: [%s]",
-                                        this.bucket, currentObject,
-                                        currentInitiateMultipartUploadResult.getUploadId()));
+                        LOG.info(String.format("write to bucket: [%s] object: [%s] with s3 uploadId: [%s]", this.bucket, currentObject, currentInitiateMultipartUploadResult.getUploadId()));
 
                         // each object's header
                         if (null != this.header && !this.header.isEmpty()) {
@@ -304,30 +293,20 @@ public class S3Writer extends Writer {
                     }
 
                     // write: upload data to current object
-                    UnstructuredStorageWriterUtil.transportOneRecord(record,
-                            this.nullFormat, this.dateParse,
-                            this.getTaskPluginCollector(), unstructuredWriter, this.encoding);
+                    UnstructuredStorageWriterUtil.transportOneRecord(record, this.nullFormat, this.dateParse, this.getTaskPluginCollector(), unstructuredWriter, this.encoding);
 
                     if (sb.length() >= partSize) {
-                        this.uploadOnePart(sw, currentPartNumber,
-                                currentInitiateMultipartUploadResult,
-                                currentPartETags, currentObject);
+                        this.uploadOnePart(sw, currentPartNumber, currentInitiateMultipartUploadResult, currentPartETags, currentObject);
                         currentPartNumber++;
                         sb.setLength(0);
                     }
 
                     // save: end current multipart upload
                     if (currentPartNumber > maxPartNumber) {
-                        LOG.info(String.format("current object [%s] size > %s, complete current multipart upload and begin new one",
-                                        currentObject, currentPartNumber * partSize));
-                        CompleteMultipartUploadRequest currentCompleteMultipartUploadRequest = new CompleteMultipartUploadRequest(
-                                this.bucket, currentObject,
-                                currentInitiateMultipartUploadResult.getUploadId(), currentPartETags);
+                        LOG.info(String.format("current object [%s] size > %s, complete current multipart upload and begin new one", currentObject, currentPartNumber * partSize));
+                        CompleteMultipartUploadRequest currentCompleteMultipartUploadRequest = new CompleteMultipartUploadRequest(this.bucket, currentObject, currentInitiateMultipartUploadResult.getUploadId(), currentPartETags);
                         CompleteMultipartUploadResult currentCompleteMultipartUploadResult = s3Client.completeMultipartUpload(currentCompleteMultipartUploadRequest);
-                        LOG.info(String.format(
-                                "final object [%s] etag is:[%s]",
-                                currentObject,
-                                currentCompleteMultipartUploadResult.getETag()));
+                        LOG.info(String.format("final object [%s] etag is:[%s]", currentObject, currentCompleteMultipartUploadResult.getETag()));
                         // warn
                         needInitMultipartTransform = true;
                     }
@@ -341,33 +320,24 @@ public class S3Writer extends Writer {
                     // each object's header
                     if (null != this.header && !this.header.isEmpty()) {
                         unstructuredWriter.writeOneRecord(this.header);
-                    }
-                    else{
+                    } else {
                         LOG.info("No data to send .");
                         return;
                     }
                 }
                 // warn: may be some data stall in sb
                 if (0 < sb.length()) {
-                    this.uploadOnePart(sw, currentPartNumber,
-                            currentInitiateMultipartUploadResult,
-                            currentPartETags, currentObject);
+                    this.uploadOnePart(sw, currentPartNumber, currentInitiateMultipartUploadResult, currentPartETags, currentObject);
                 }
-                CompleteMultipartUploadRequest completeMultipartUploadRequest = new CompleteMultipartUploadRequest(
-                        this.bucket, currentObject,
-                        currentInitiateMultipartUploadResult.getUploadId(),
-                        currentPartETags);
+                CompleteMultipartUploadRequest completeMultipartUploadRequest = new CompleteMultipartUploadRequest(this.bucket, currentObject, currentInitiateMultipartUploadResult.getUploadId(), currentPartETags);
                 CompleteMultipartUploadResult completeMultipartUploadResult = s3Client.completeMultipartUpload(completeMultipartUploadRequest);
-                LOG.info(String.format("final object etag is:[%s]",
-                        completeMultipartUploadResult.getETag()));
+                LOG.info(String.format("final object etag is:[%s]", completeMultipartUploadResult.getETag()));
             } catch (IOException e) {
                 // 脏数据UnstructuredStorageWriterUtil.transportOneRecord已经记录,header
                 // 都是字符串不认为有脏数据
-                throw DataXException.asDataXException(
-                        S3WriterErrorCode.Write_OBJECT_ERROR, e.getMessage());
+                throw DataXException.asDataXException(S3WriterErrorCode.Write_OBJECT_ERROR, e.getMessage());
             } catch (Exception e) {
-                throw DataXException.asDataXException(
-                        S3WriterErrorCode.Write_OBJECT_ERROR, e.getMessage());
+                throw DataXException.asDataXException(S3WriterErrorCode.Write_OBJECT_ERROR, e.getMessage());
             }
             LOG.info("end do write");
         }
@@ -378,12 +348,7 @@ public class S3Writer extends Writer {
          *
          * @throws Exception
          */
-        private void uploadOnePart(
-                final StringWriter sw,
-                final int partNumber,
-                final InitiateMultipartUploadResult initiateMultipartUploadResult,
-                final List<PartETag> partETags, final String currentObject)
-                throws Exception {
+        private void uploadOnePart(final StringWriter sw, final int partNumber, final InitiateMultipartUploadResult initiateMultipartUploadResult, final List<PartETag> partETags, final String currentObject) throws Exception {
             final String encoding = this.encoding;
             final String bucket = this.bucket;
             final AmazonS3 s3Client = this.s3Client;
@@ -391,8 +356,7 @@ public class S3Writer extends Writer {
                 @Override
                 public Boolean call() throws Exception {
                     byte[] byteArray = sw.toString().getBytes(encoding);
-                    InputStream inputStream = new ByteArrayInputStream(
-                            byteArray);
+                    InputStream inputStream = new ByteArrayInputStream(byteArray);
                     // 创建UploadPartRequest，上传分块
                     UploadPartRequest uploadPartRequest = new UploadPartRequest();
                     uploadPartRequest.setBucketName(bucket);
@@ -403,8 +367,7 @@ public class S3Writer extends Writer {
                     uploadPartRequest.setPartNumber(partNumber);
                     UploadPartResult uploadPartResult = s3Client.uploadPart(uploadPartRequest);
                     partETags.add(uploadPartResult.getPartETag());
-                    LOG.info(String.format("upload part [%s] size [%s] Byte has been completed.",
-                                    partNumber, byteArray.length));
+                    LOG.info(String.format("upload part [%s] size [%s] Byte has been completed.", partNumber, byteArray.length));
                     IOUtils.closeQuietly(inputStream);
                     return true;
                 }

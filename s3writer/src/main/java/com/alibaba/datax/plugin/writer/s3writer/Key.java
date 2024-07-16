@@ -23,4 +23,7 @@ public class Key {
     public static final String ACCESSTOKEN = "accessToken";
 
     public static final String SESSIONDURATIONSECONDS="sessionDurations";
+
+    //support types: default, aksk, assumerole
+    public static final String AUTHTYPE="authType";
 }

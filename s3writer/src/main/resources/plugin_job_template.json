@@ -1,6 +1,7 @@
 {
     "name": "s3writer",
     "parameter": {
+        "authType": "",
         "endpoint": "",
         "accessId": "",
         "accessKey": "",
